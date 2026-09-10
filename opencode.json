@@ -1,0 +1,30 @@
+{
+  "agents": {
+    "nestjs-module": {
+      "description": "Genera módulos NestJS completos (controller, service, module, dto, entity, guards)",
+      "prompt": "Crea un módulo NestJS siguiendo la arquitectura del proyecto diagramador-uml. Genera: controller, service, module, dto (create/update), entity, y guards si aplica. Usa decoradores @Controller, @Get, @Post, @UseGuards, @Injectable. Valida siempre con class-validator en los DTOs."
+    },
+    "prisma-entity": {
+      "description": "Genera o actualiza entidades Prisma desde el schema",
+      "prompt": "Actualiza el schema.prisma con las siguientes entidades y ejecuta npx prisma generate"
+    }
+  },
+  "skills": {
+    "nestjs-conventions": {
+      "description": "Reglas de codigo para NestJS",
+      "rules": [
+        "Modulos autocontenidos: controller + service + module + dto + entity + guards",
+        "Usa decoradores @Controller, @Get, @Post, @UseGuards, @Injectable",
+        "Valida con class-validator en DTOs",
+        "Autenticacion: JwtStrategy + JwtAuthGuard",
+        "API versionada: /api/v1/recurso",
+        "CORS configurado en cors.config.ts",
+        "Logueo estructurado con pino"
+      ]
+    }
+  },
+  "permissionRules": [
+    "allow: nest build, nest start, npx prisma *",
+    "deny: rm -rf, drop database, force push migrations"
+  ]
+}

@@ -1,0 +1,135 @@
+// Modelo de datos del diagramador UML colaborativo.
+// Definido según .agents/database.md. Compatible con NeonDB (Postgres serverless)
+// usando el driver adapter @neondatabase/serverless.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider     = "postgresql"
+  url          = env("DATABASE_URL")
+  directUrl    = env("DIRECT_URL")
+  relationMode = "foreignKeys"
+}
+
+/// Usuarios del sistema (autenticados con JWT).
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  username     String   @unique @db.VarChar(50) @map("username")
+  email        String   @unique @db.VarChar(255)
+  name         String   @db.VarChar(255)
+  passwordHash String   @map("password_hash") @db.VarChar(255)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  workspaces          Workspace[]          @relation("WorkspaceOwner")
+  diagrams            Diagram[]            @relation("DiagramAuthor")
+  diagramCollaborators DiagramCollaborator[]
+  aiSessions          AiSession[]
+
+  @@map("users")
+}
+
+/// Espacios de trabajo, uno por propietario (privados).
+model Workspace {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @db.VarChar(255)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  ownerId String @map("owner_id") @db.Uuid
+  owner   User   @relation("WorkspaceOwner", fields: [ownerId], references: [id])
+
+  diagrams Diagram[]
+
+  @@map("workspaces")
+}
+
+/// Diagramas de clases UML. Guarda el estado binario de Yjs y el estado observable de React Flow.
+model Diagram {
+  id             String   @id @default(uuid()) @db.Uuid
+  name           String   @db.VarChar(255)
+  yjsDocument    Bytes    @map("yjs_document")
+  reactFlowState Json?    @map("react_flow_state")
+  position       Int      @default(0)
+  lastModified   DateTime @default(now()) @map("last_modified")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  workspaceId String    @map("workspace_id") @db.Uuid
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+
+  createdById String @map("created_by") @db.Uuid
+  createdBy   User   @relation("DiagramAuthor", fields: [createdById], references: [id])
+
+  collaborators DiagramCollaborator[]
+  aiSessions    AiSession[]
+
+  @@map("diagrams")
+}
+
+/// Colaboradores de un diagrama (muchos a muchos entre User y Diagram).
+model DiagramCollaborator {
+  role       CollaboratorRole @default(EDITOR)
+  assignedAt DateTime         @default(now()) @map("assigned_at")
+
+  diagramId String @map("diagram_id") @db.Uuid
+  diagram   Diagram @relation(fields: [diagramId], references: [id])
+
+  userId String @map("user_id") @db.Uuid
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@id([diagramId, userId])
+  @@map("diagram_collaborators")
+}
+
+/// Sesiones de IA vinculadas a un diagrama y a un usuario.
+model AiSession {
+  id        String    @id @default(uuid()) @db.Uuid
+  agentType AgentType @map("agent_type")
+  startedAt DateTime  @default(now()) @map("started_at")
+
+  diagramId String @map("diagram_id") @db.Uuid
+  diagram   Diagram @relation(fields: [diagramId], references: [id])
+
+  userId String @map("user_id") @db.Uuid
+  user   User   @relation(fields: [userId], references: [id])
+
+  messages AiMessage[]
+
+  @@map("ai_sessions")
+}
+
+/// Mensajes individuales dentro de una sesión de IA.
+model AiMessage {
+  id        String      @id @default(uuid()) @db.Uuid
+  role      MessageRole
+  toolName  String?     @map("tool_name") @db.VarChar(50)
+  content   String      @db.Text
+  createdAt DateTime    @default(now()) @map("created_at")
+
+  sessionId String    @map("session_id") @db.Uuid
+  session   AiSession @relation(fields: [sessionId], references: [id])
+
+  @@map("ai_messages")
+}
+
+/// Rol de cada colaborador dentro de un diagrama.
+enum CollaboratorRole {
+  OWNER
+  EDITOR
+  VIEWER
+}
+
+/// Tipo de agente de IA que atiende una sesión.
+enum AgentType {
+  SUPPORT
+  COPILOT
+  SPRING_BOOT
+}
+
+/// Rol del emisor de un mensaje dentro de una conversacion de IA.
+enum MessageRole {
+  USER
+  ASSISTANT
+  TOOL
+}
