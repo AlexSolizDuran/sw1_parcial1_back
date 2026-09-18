@@ -78,6 +78,12 @@ export interface CanonicalRelation {
   label?: string;
   multiplicidadOrigen?: string;
   multiplicidadDestino?: string;
+  /**
+   * Señal interna de eliminacion en modo foco: si el modelo devuelve la
+   * relacion con "eliminar": true se filtra en la reconstruccion y el diff
+   * genera un deleteRelacion. Nunca llega a las acciones ni al lienzo.
+   */
+  eliminar?: boolean;
 }
 
 /** Diagrama completo tal como se envia al modelo. */
@@ -86,12 +92,18 @@ export interface CanonicalDiagram {
   relaciones: CanonicalRelation[];
 }
 
+/** Tipos de respuesta del modelo. */
+export type ModelOutputTipo = 'diagrama' | 'chat';
+
 /** Salida completa esperada del modelo: explicacion + diagrama nuevo. */
 export interface ModelOutput {
+  /** Tipo de respuesta: 'diagrama' para cambios en el diagrama, 'chat' para conversacion. Default: 'diagrama'. */
+  tipo?: ModelOutputTipo;
   /** Explicacion breve en espanol de lo que cambio (va al chat). */
   mensaje: string;
-  entidades: CanonicalEntity[];
-  relaciones: CanonicalRelation[];
+  /** Entidades y relaciones: requerido solo si tipo es "diagrama". */
+  entidades?: CanonicalEntity[];
+  relaciones?: CanonicalRelation[];
 }
 
 /**

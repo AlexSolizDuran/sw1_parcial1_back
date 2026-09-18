@@ -10,6 +10,7 @@ import { EndpointsModule } from './modules/endpoints/endpoints.module';
 import { RealtimeModule } from './modules/realtime/realtime.module';
 import { CollaboratorsModule } from './modules/collaborators/collaborators.module';
 import { AiModule } from './modules/ai/ai.module';
+import { SpringBootModule } from './modules/spring-boot/spring-boot.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { AiModule } from './modules/ai/ai.module';
     RealtimeModule,
     CollaboratorsModule,
     AiModule,
+    SpringBootModule,
   ],
   controllers: [AppController],
   providers: [AppService],

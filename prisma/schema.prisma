@@ -52,6 +52,7 @@ model Diagram {
   yjsDocument    Bytes    @map("yjs_document")
   reactFlowState Json?    @map("react_flow_state")
   position       Int      @default(0)
+  group          String?  @db.VarChar(255)
   lastModified   DateTime @default(now()) @map("last_modified")
   createdAt      DateTime @default(now()) @map("created_at")
 

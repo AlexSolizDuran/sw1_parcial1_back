@@ -223,7 +223,8 @@ export class RealtimeGateway
   @SubscribeMessage('awareness')
   async handleAwareness(
     @ConnectedSocket() client: Socket,
-    @MessageBody() payload: {
+    @MessageBody()
+    payload: {
       diagramId: string;
       userId?: string;
       locks: Record<string, { userId: string; userName: string }>;
@@ -268,7 +269,7 @@ function toUint8Array(value: unknown): Uint8Array | null {
   if (value instanceof Uint8Array) return value;
   if (value instanceof ArrayBuffer) return new Uint8Array(value);
   if (ArrayBuffer.isView(value)) {
-    const view = value as ArrayBufferView;
+    const view = value;
     return new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
   }
   return null;

@@ -12,6 +12,9 @@ export class DiagramEntity {
   /** Posicion en el orden de diagramas del workspace (UC-1.6). */
   position: number;
 
+  /** Grupo de organizacion dentro del workspace (CU-1.3, null = sin grupo). */
+  group?: string | null;
+
   /** Fecha de la ultima modificacion del diagrama. */
   lastModified: Date;
 

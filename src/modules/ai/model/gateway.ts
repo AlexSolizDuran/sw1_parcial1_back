@@ -21,6 +21,7 @@ import type {
   ModelOutput,
 } from '../dsl/canonical';
 import type { ModeloConfig, ParametrosGeneracion } from './models.config';
+import { buscarEntradas, formatearEntrada } from '../support/support-manual';
 
 /** Mensaje en el formato estándar de chat que entienden los modelos. */
 export interface MensajeModelo {
@@ -235,7 +236,24 @@ async function leerStreamGradio(
   return textos.length > 0 ? textos[textos.length - 1] : '';
 }
 
-// ─────────────────────────── Proveedor MOCK ───────────────────────────
+// ─────────────────────────── Proveedor MOCK: SUPPORT ───────────────────────────
+
+/**
+ * Respuesta de ayuda deterministica para desarrollo (sin GPU).
+ * Mini-retrieval sobre el MANUAL en memoria: puntua entradas por keywords
+ * y devuelve la mejor (mismo circuito conceptual que el RAG real).
+ * @param mensajes - Historial con system [SUPPORT] + contexto + pregunta
+ * @returns Texto plano de ayuda en español
+ */
+export function generarMockSupport(mensajes: MensajeModelo[]): string {
+  const pregunta =
+    [...mensajes].reverse().find((m) => m.role === 'user')?.content ?? '';
+  const [mejor] = buscarEntradas(pregunta, 1);
+  if (mejor) return `${formatearEntrada(mejor)} (mock)`;
+  return 'Solo puedo ayudarte con el uso de la plataforma (mock). Temas: invitaciones y roles, editor de diagramas, versiones, exportar XMI, generar Spring Boot y cuenta. ¿Sobre cuál preguntas?';
+}
+
+// ─────────────────────────── Proveedor MOCK: COPILOT ───────────────────────────
 
 /** Extrae la instruccion del contenido del mensaje del usuario. */
 function extraerInstruccion(content: string): string {
@@ -285,15 +303,43 @@ function buscarPorNombre(
   return entidades.find((e) => e.nombre.toLowerCase() === nombre.toLowerCase());
 }
 
+/** Detecta preguntas conversacionales para responder como chat en el mock. */
+function esPreguntaConversacional(instruccion: string): boolean {
+  return /^(?:hola|hello|buenas|c[oó]mo|por qu[eé]\b|qu[eé] es|cu[aá]l es|explica|ay[úu]dame?\b)/i.test(
+    instruccion,
+  );
+}
+
 /**
  * Proveedor de desarrollo: aplica ediciones deterministicas sobre el diagrama
  * actual segun la instruccion, usando las mismas reglas que el modelo real.
  * Soporta: crear clase, renombrar clase, eliminar clase, convertir a enumeracion.
  */
 export function generarMock(mensajes: MensajeModelo[]): string {
+  // Rama SUPPORT: el system empieza con el marcador [SUPPORT]; se responde
+  // texto plano de ayuda (sin JSON ni DSL) segun keywords de la pregunta.
+  if (
+    mensajes[0]?.role === 'system' &&
+    mensajes[0].content.includes('[SUPPORT]')
+  ) {
+    return generarMockSupport(mensajes);
+  }
+
   const usuario = [...mensajes].reverse().find((m) => m.role === 'user');
   const content = usuario?.content ?? '';
   const instruccion = extraerInstruccion(content).toLowerCase();
+
+  // Respuestas conversacionales: preguntas conceptuales o saludos se
+  // responden como chat en lugar de editar el diagrama.
+  if (esPreguntaConversacional(instruccion)) {
+    const salidaChat: ModelOutput = {
+      tipo: 'chat',
+      mensaje:
+        'Soy el asistente de diagramas UML. Puedo ayudarte a crear y modificar diagramas de clases, o explicarte conceptos de UML. ¿Qué necesitás?',
+    };
+    return JSON.stringify(salidaChat);
+  }
+
   const diagrama = normalizarDiagrama(extractJson(content));
 
   const entidades = [...diagrama.entidades];

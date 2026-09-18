@@ -1,5 +1,7 @@
 import { Type } from 'class-transformer';
 import {
+  isBoolean,
+  IsBoolean,
   IsIn,
   IsInt,
   IsNumber,
@@ -90,4 +92,13 @@ export class ChatRequestDto {
   @IsOptional()
   @IsIn(['entidad', 'relacion'])
   seleccionKind?: 'entidad' | 'relacion';
+
+  /** Si es true, incluye los últimos 3 mensajes USER + 3 ASSISTANT como contexto. */
+  @IsOptional()
+  @IsBoolean()
+  conContexto?: boolean = true;
+
+  @IsOptional()
+  @IsBoolean()
+  seleccionRestrictiva?: boolean = false;
 }

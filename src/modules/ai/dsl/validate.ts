@@ -5,6 +5,7 @@
  */
 import { BadRequestException } from '@nestjs/common';
 import type {
+  CanonicalDiagram,
   CanonicalEntity,
   CanonicalField,
   CanonicalMethod,
@@ -12,6 +13,7 @@ import type {
   CanonicalRelation,
   EntidadTipo,
   ModelOutput,
+  ModelOutputTipo,
   TipoRelacion,
   Visibilidad,
 } from './canonical';
@@ -90,12 +92,35 @@ function esEntidad(valor: unknown): valor is CanonicalEntity {
   return true;
 }
 
+/** true si el valor es string (permite vacio). */
+function esCadena(valor: unknown): valor is string {
+  return typeof valor === 'string';
+}
+
 function esRelacion(valor: unknown): valor is CanonicalRelation {
   if (!esObjeto(valor)) return false;
   if (!esCadenaNoVacia(valor.id)) return false;
   if (!TIPOS_RELACION.includes(valor.tipo as TipoRelacion)) return false;
   if (!esCadenaNoVacia(valor.origen)) return false;
   if (!esCadenaNoVacia(valor.destino)) return false;
+  // Campos opcionales: si vienen, deben ser strings (label y multiplicidades)
+  if (valor.label !== undefined && !esCadena(valor.label)) return false;
+  if (
+    valor.multiplicidadOrigen !== undefined &&
+    !esCadena(valor.multiplicidadOrigen)
+  ) {
+    return false;
+  }
+  if (
+    valor.multiplicidadDestino !== undefined &&
+    !esCadena(valor.multiplicidadDestino)
+  ) {
+    return false;
+  }
+  // Señal interna de eliminación en modo foco: si viene, debe ser booleano
+  if (valor.eliminar !== undefined && typeof valor.eliminar !== 'boolean') {
+    return false;
+  }
   return true;
 }
 
@@ -116,6 +141,19 @@ export function validateModelOutput(valor: unknown): ModelOutput {
       'Falta el campo obligatorio "mensaje" (string).',
     );
   }
+
+  // Determinar el tipo de respuesta (default: 'diagrama' para backward compat)
+  const tipo = (valor.tipo as ModelOutputTipo) ?? 'diagrama';
+
+  if (tipo === 'chat') {
+    // Modo chat: solo requiere mensaje, entidades y relaciones son opcionales
+    return {
+      tipo: 'chat',
+      mensaje: valor.mensaje,
+    };
+  }
+
+  // Modo diagrama: requerir entidades y relaciones (validación existente)
   if (!Array.isArray(valor.entidades)) {
     throw new AiValidationError(
       'Falta el campo obligatorio "entidades" (array).',
@@ -157,6 +195,7 @@ export function validateModelOutput(valor: unknown): ModelOutput {
   }
 
   return {
+    tipo: 'diagrama',
     mensaje: valor.mensaje,
     entidades: entidades as CanonicalEntity[],
     relaciones: relaciones as CanonicalRelation[],
@@ -177,4 +216,59 @@ export function toHttpError(error: unknown, intento: number): never {
   throw new BadRequestException(
     `La IA no genero un resultado valido (intento ${intento}): ${detalle}`,
   );
+}
+
+/**
+ * Valida el diagrama canonico crudo devuelto por el microservicio vision->DSL.
+ * A diferencia de ModelOutput (chat), el microservicio devuelve SOLO
+ * { entidades, relaciones } sin la clave "mensaje". Reutiliza los mismos
+ * validadores internos (esEntidad/esRelacion) y garantiza ids unicos.
+ * @param valor - JSON ya parseado de la salida del microservicio
+ * @returns El CanonicalDiagram tipado
+ * @throws AiValidationError con el detalle del primer error encontrado
+ */
+export function validarDiagramoOutput(valor: unknown): CanonicalDiagram {
+  if (!esObjeto(valor)) {
+    throw new AiValidationError(
+      'El resultado debe ser un objeto JSON con "entidades" y "relaciones".',
+    );
+  }
+  if (!Array.isArray(valor.entidades)) {
+    throw new AiValidationError(
+      'Falta el campo obligatorio "entidades" (array).',
+    );
+  }
+  if (valor.relaciones !== undefined && !Array.isArray(valor.relaciones)) {
+    throw new AiValidationError('El campo "relaciones" debe ser un array.');
+  }
+
+  const entidades = valor.entidades as unknown[];
+  const relaciones = (valor.relaciones ?? []) as unknown[];
+
+  if (!entidades.every((e) => esEntidad(e))) {
+    throw new AiValidationError(
+      'Una o mas entidades no cumplen el contrato del DSL ' +
+        '(id, tipo class|interface|abstract|enumeration, nombre, atributos[], metodos[]).',
+    );
+  }
+  if (!relaciones.every((r) => esRelacion(r))) {
+    throw new AiValidationError(
+      'Una o mas relaciones no cumplen el contrato del DSL ' +
+        '(id, tipo, origen y destino con ids existentes).',
+    );
+  }
+
+  const idsEntidades = entidades.map((e) => e.id);
+  if (new Set(idsEntidades).size !== idsEntidades.length) {
+    throw new AiValidationError('Los ids de "entidades" no pueden repetirse.');
+  }
+  const idsRelaciones = relaciones.map((r) => r.id);
+  if (new Set(idsRelaciones).size !== idsRelaciones.length) {
+    throw new AiValidationError('Los ids de "relaciones" no pueden repetirse.');
+  }
+
+  return {
+    entidades: entidades,
+    relaciones: relaciones,
+  };
 }

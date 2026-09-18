@@ -174,14 +174,30 @@ export function maxTokensParaDiagrama(diagramaJson: string): number {
 
 /**
  * Presupuesto de tokens para el modo foco (entidad seleccionada).
- * Solo se devuelve UNA entidad y sus relaciones tocantes, asi que el
- * default de 512 suele alcanzar; se escala igual por seguridad.
- * @param entidadJson - Entidad seleccionada serializada
- * @returns Tokens maximos clampados a [256, 2048]
+ * El modelo devuelve la entidad (posiblemente editada y MAS grande que la de
+ * entrada) + sus relaciones tocantes + el mensaje. Calcularlo solo sobre la
+ * entidad de entrada hacia truncar el output y el diff podia eliminar la
+ * entidad/relaciones por error. Se estima sobre el contexto completo (entidad
+ * + relaciones) con margen de crecimiento para los cambios pedidos.
+ * @param contextoJson - Contexto de foco serializado (entidad + relaciones)
+ * @returns Tokens maximos clampados a [512, 4096]
  */
-export function maxTokensParaFoco(entidadJson: string): number {
-  const estimado = Math.ceil(entidadJson.length / 3.5) * 1.6 + 300;
-  return Math.round(clamp(estimado, 256, 2048));
+export function maxTokensParaFoco(contextoJson: string): number {
+  // ~3.5 caracteres por token en JSON espanol compacto; margen x2.2 + 400
+  // para el mensaje y el crecimiento del output por las ediciones.
+  const estimado = Math.ceil(contextoJson.length / 3.5) * 2.2 + 400;
+  return Math.round(clamp(estimado, 512, 4096));
+}
+
+/**
+ * Presupuesto de tokens para el agente SUPPORT (ayuda de uso).
+ * Respuestas cortas en texto plano (~150 palabras).
+ * @returns Tokens maximos clampados a [32, 1024]
+ */
+export function maxTokensSupport(): number {
+  return Math.round(
+    clamp(Number(process.env.AI_SUPPORT_MAX_TOKENS ?? '512'), 32, 1024),
+  );
 }
 
 /** Lista publica modelada para el endpoint /ai/models. */

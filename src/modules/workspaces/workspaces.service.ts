@@ -73,10 +73,12 @@ export class WorkspacesService {
       where: { id },
       include: {
         diagrams: {
-          orderBy: { createdAt: 'desc' },
+          orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
           select: {
             id: true,
             name: true,
+            position: true,
+            group: true,
             lastModified: true,
             reactFlowState: true,
           },
@@ -102,6 +104,8 @@ export class WorkspacesService {
       diagrams: workspace.diagrams.map((diagram) => ({
         id: diagram.id,
         name: diagram.name,
+        position: diagram.position,
+        group: diagram.group,
         lastModified: diagram.lastModified,
       })),
     };
@@ -126,7 +130,9 @@ export class WorkspacesService {
     }
 
     if (workspace.ownerId !== ownerId) {
-      throw new ForbiddenException('Solo el owner puede modificar el workspace');
+      throw new ForbiddenException(
+        'Solo el owner puede modificar el workspace',
+      );
     }
 
     const updated = await this.prisma.workspace.update({

@@ -207,7 +207,8 @@ export function projectState(
   // El indice coincide con el de las entidades (posicion en nodosValidos).
   const realACanonico = new Map<string, string>();
   nodosValidos.forEach((node, index) => {
-    if (typeof node.id === 'string') realACanonico.set(node.id, `n${index + 1}`);
+    if (typeof node.id === 'string')
+      realACanonico.set(node.id, `n${index + 1}`);
   });
 
   // Solo se proyectan aristas con origen/destino y tipo conocido

@@ -40,6 +40,7 @@ import {
   validateModelOutput,
 } from './dsl/validate';
 import { FEW_SHOT_EXAMPLES, FEW_SHOT_FOCO_EXAMPLES } from './prompts/few-shot';
+import { formatearInstruccion } from './prompts/formatear-instruccion';
 import { systemPrompt } from './prompts/system-prompt';
 import {
   fusionarParametros,
@@ -118,8 +119,10 @@ export class AiService {
       modelo?: string;
       params?: Partial<ParametrosGeneracion>;
       snapshot: Record<string, unknown>;
+      conContexto?: boolean;
       seleccionId?: string;
       seleccionKind?: 'entidad' | 'relacion';
+      seleccionRestrictiva?: boolean;
     },
   ): Promise<ChatResponse> {
     const { rol } = await this.resolverAcceso(diagramId, userId);
@@ -149,15 +152,21 @@ export class AiService {
         ? { id: dto.seleccionId, kind: dto.seleccionKind }
         : null;
 
+    const restrictivo = dto.seleccionRestrictiva === true;
     // Modo foco: hay una entidad seleccionada y estamos en agregar.
     // El modelo solo edita esa entidad (contexto reducido); el backend
     // reconstruye el resto intacto para que el diff no genere ruido.
     // Si la seleccion no existe en el snapshot, se usa el modo normal.
     const idCanonicoFoco =
-      modo === 'agregar' && seleccion?.kind === 'entidad'
+      modo === 'agregar' && restrictivo && seleccion?.kind === 'entidad'
         ? idCanonicoDe(seleccion.id, proyeccion.idMap)
         : null;
     const foco = idCanonicoFoco !== null;
+
+    const idCanonicoSeleccion =
+      seleccion && !foco
+        ? (idCanonicoDe(seleccion.id, proyeccion.idMap) ?? seleccion.id)
+        : null;
 
     let params = fusionarParametros(modelo, dto.params);
     // Presupuesto de salida segun el tamano del diagrama: el modelo debe
@@ -169,11 +178,13 @@ export class AiService {
         // Modo reemplazar construye el diagrama completo desde cero
         params = { ...params, maxTokens: maxTokensReemplazar() };
       } else if (foco) {
-        // Modo foco: solo se devuelve UNA entidad y sus relaciones
+        // Modo foco: solo se devuelve UNA entidad y sus relaciones.
+        // El presupuesto se calcula sobre la entidad + sus relaciones
+        // tocantes para que el output editado no se trunque.
         const ctx = contextoFoco(proyeccion.resultado, idCanonicoFoco);
         params = {
           ...params,
-          maxTokens: maxTokensParaFoco(JSON.stringify(ctx.seleccionada ?? {})),
+          maxTokens: maxTokensParaFoco(JSON.stringify(ctx)),
         };
       } else {
         // Modo agregar reproduce el diagrama actual + cambios
@@ -193,6 +204,7 @@ export class AiService {
       params,
       modelo.id,
       seleccion,
+      restrictivo,
       modo,
     );
     let salida = this.leerCache(clave);
@@ -201,6 +213,8 @@ export class AiService {
       usoCache = true;
     } else {
       salida = await this.generarSalida(
+        session.id,
+        dto.conContexto ?? true,
         dto.instruccion,
         proyeccion.resultado,
         modo,
@@ -208,28 +222,59 @@ export class AiService {
         params,
         modelo.id,
         idCanonicoFoco,
+        restrictivo,
+        idCanonicoSeleccion,
       );
       this.guardarCache(clave, salida);
+    }
+
+    // NUEVO: Branching por tipo de respuesta
+    if (salida.tipo === 'chat') {
+      // Respuesta conversacional: persistir mensaje y retornar sin acciones
+      const mensajePersistido = await this.persistirMensaje(
+        session.id,
+        'ASSISTANT',
+        salida.mensaje,
+      );
+      return {
+        sessionId: session.id,
+        mensajeId: mensajePersistido.id,
+        texto: salida.mensaje,
+        acciones: [],
+        advertencias: [],
+        rol,
+        puedeAplicar,
+        cache: usoCache,
+        modelo: modelo.id,
+      };
     }
 
     // 4. Diff y resolucion de acciones (ids reales + alcance)
     // En modo foco la salida es reducida (solo lo seleccionado): se
     // reconstruye el diagrama completo antes del diff para que el resto
-    // quede intacto y no aparezcan eliminaciones fantasma.
-    const deseado =
+    // quede intacto y no aparezcan eliminaciones fantasma. La reconstruccion
+    // ademas evita borrar la tabla seleccionada si el modelo no la devolvio
+    // (id drift, truncamiento u omision sin señal de borrado).
+    const reconstruccion =
       foco && idCanonicoFoco
         ? reconstruirConFoco(
             proyeccion.resultado,
-            { entidades: salida.entidades, relaciones: salida.relaciones },
+            { entidades: salida.entidades!, relaciones: salida.relaciones! },
             idCanonicoFoco,
           )
-        : { entidades: salida.entidades, relaciones: salida.relaciones };
+        : null;
+    const deseado = reconstruccion
+      ? reconstruccion.diagrama
+      : { entidades: salida.entidades!, relaciones: salida.relaciones! };
     const acciones = diffDiagrams(proyeccion.resultado, deseado);
-    const { acciones: aplicables, advertencias } = resolveActions(
+    const { acciones: aplicables, advertencias: resueltas } = resolveActions(
       acciones,
       proyeccion,
-      seleccion,
+      restrictivo ? seleccion : null,
     );
+    const advertencias = reconstruccion
+      ? [...reconstruccion.advertencias, ...resueltas]
+      : resueltas;
 
     // 5. Persistencia del historial
     const respuesta = await this.persistirMensaje(
@@ -409,6 +454,8 @@ export class AiService {
 
   /** Ejecuta el modelo (con reintento) y devuelve la salida validada. */
   private async generarSalida(
+    sessionId: string,
+    conContexto: boolean,
     instruccion: string,
     diagrama: CanonicalDiagram,
     modo: 'agregar' | 'reemplazar',
@@ -416,19 +463,30 @@ export class AiService {
     params: ParametrosGeneracion,
     modeloId: string,
     idCanonicoFoco: string | null,
+    restrictivo: boolean,
+    idCanonicoSeleccion: string | null,
   ): Promise<ModelOutput> {
+    // Obtener contexto de mensajes anteriores si está habilitado
+    const contexto = conContexto
+      ? await this.obtenerContextoReciente(sessionId)
+      : [];
+
     const mensajes = this.construirMensajes(
+      contexto,
       instruccion,
       diagrama,
       modo,
       seleccion,
       idCanonicoFoco,
+      restrictivo,
+      idCanonicoSeleccion,
     );
     const modelo = obtenerModelo(modeloId);
 
     // Primer intento con la temperatura configurada
     const texto1 = await this.gateway.generar(mensajes, modelo, params);
     try {
+      // Si es respuesta de tipo chat, se retorna solo el mensaje sin diff/acciones
       const salida = validateModelOutput(extractJson(texto1));
       return { ...salida, mensaje: salida.mensaje.slice(0, 1000) };
     } catch (error) {
@@ -448,6 +506,7 @@ export class AiService {
       );
       try {
         const salida = validateModelOutput(extractJson(texto2));
+        // Mismo manejo para reintento
         return { ...salida, mensaje: salida.mensaje.slice(0, 1000) };
       } catch (error2) {
         toHttpError(error2, 2);
@@ -458,15 +517,31 @@ export class AiService {
 
   /** Construye el historial system + few-shot + caso real. */
   private construirMensajes(
+    contexto: MensajeModelo[],
     instruccion: string,
     diagrama: CanonicalDiagram,
     modo: 'agregar' | 'reemplazar',
     seleccion: Seleccion | null,
     idCanonicoFoco: string | null,
+    restrictivo: boolean,
+    idCanonicoSeleccion: string | null,
   ): MensajeModelo[] {
     const mensajes: MensajeModelo[] = [
       { role: 'system', content: systemPrompt() },
     ];
+
+    // NUEVO: Inyectar contexto de mensajes anteriores si existe
+    if (contexto.length > 0) {
+      mensajes.push({
+        role: 'user',
+        content: '--- Contexto de la conversación anterior ---',
+      });
+      mensajes.push(...contexto);
+      mensajes.push({
+        role: 'user',
+        content: '--- Fin del contexto. Respondé a la nueva instrucción ---',
+      });
+    }
 
     // Modo foco: contexto reducido (solo la entidad seleccionada) con sus
     // propios ejemplos; el backend reconstruye el resto intacto.
@@ -504,6 +579,7 @@ export class AiService {
           ejemplo.instruccion,
           ejemplo.diagramaActual,
           'agregar',
+          false,
           null,
         ),
       });
@@ -515,7 +591,13 @@ export class AiService {
 
     mensajes.push({
       role: 'user',
-      content: formatearInstruccion(instruccion, diagrama, modo, seleccion),
+      content: formatearInstruccion(
+        instruccion,
+        diagrama,
+        modo,
+        restrictivo,
+        idCanonicoSeleccion,
+      ),
     });
     return mensajes;
   }
@@ -527,6 +609,7 @@ export class AiService {
     params: ParametrosGeneracion,
     modelo: string,
     seleccion: Seleccion | null,
+    restringir: boolean,
     modo: string,
   ): string {
     const material = [
@@ -537,6 +620,7 @@ export class AiService {
       params.maxTokens,
       modelo,
       seleccion ? `${seleccion.kind}:${seleccion.id}` : 'todo',
+      restringir,
       modo,
     ].join('|');
     return createHash('sha256').update(material).digest('hex');
@@ -551,6 +635,41 @@ export class AiService {
     this.cache.delete(clave);
     this.cache.set(clave, valor);
     return valor;
+  }
+
+  /** Obtiene los últimos 3 mensajes del usuario y 3 del asistente de la sesión. */
+  private async obtenerContextoReciente(
+    sessionId: string,
+  ): Promise<MensajeModelo[]> {
+    const [userMessages, assistantMessages] = await Promise.all([
+      this.prisma.aiMessage.findMany({
+        where: { sessionId, role: 'USER' },
+        orderBy: { createdAt: 'desc' },
+        take: 3,
+      }),
+      this.prisma.aiMessage.findMany({
+        where: { sessionId, role: 'ASSISTANT' },
+        orderBy: { createdAt: 'desc' },
+        take: 3,
+      }),
+    ]);
+
+    // Combinar todos los mensajes y ordenar cronológicamente (de más antiguo a más reciente)
+    const todos = [
+      ...userMessages.map((m) => ({
+        role: 'user' as const,
+        content: m.content,
+        fecha: m.createdAt,
+      })),
+      ...assistantMessages.map((m) => ({
+        role: 'assistant' as const,
+        content: m.content,
+        fecha: m.createdAt,
+      })),
+    ].sort((a, b) => a.fecha.getTime() - b.fecha.getTime());
+
+    // Retornar los últimos 6 en orden cronológico, sin el campo fecha
+    return todos.slice(-6).map(({ role, content }) => ({ role, content }));
   }
 
   /** Escribe en la cache LRU y evita el tamano maximo. */
@@ -612,7 +731,9 @@ function formatearInstruccionFoco(
     'Modo foco: estás editando SOLO la entidad seleccionada de abajo.',
     'Devolvé un JSON con "mensaje", "entidades" y "relaciones" donde:',
     '- "entidades" trae UNICAMENTE la entidad seleccionada ya editada. Para ELIMINARLA, devolvé "entidades": [] (array vacío).',
-    '- "relaciones" trae UNICAMENTE las relaciones de esta entidad en su estado FINAL (las que falten se eliminan).',
+    '- "relaciones" trae UNICAMENTE las relaciones de esta entidad que quieras CREAR o MODIFICAR (nombre, multiplicidad, tipo, extremos). Las que NO incluyas se conservan tal cual están: omitir una relación NUNCA la elimina.',
+    '- Para ELIMINAR una relación, incluí esa relación en "relaciones" con el campo "eliminar": true. Para eliminar TODAS las relaciones, devolvé cada una con "eliminar": true.',
+    '- Si eliminás la entidad ("entidades": []), sus relaciones se eliminan solas: no hace falta marcarlas.',
     '- NUNCA incluyas otras entidades del diagrama.',
     '',
     '## Entidad seleccionada (JSON)',
@@ -622,22 +743,4 @@ function formatearInstruccionFoco(
     JSON.stringify(contexto.relacionesTocantes),
     otras,
   ].join('\n');
-}
-
-/** Da formato al mensaje del usuario con la instruccion y el diagrama. */
-function formatearInstruccion(
-  instruccion: string,
-  diagrama: CanonicalDiagram,
-  modo: 'agregar' | 'reemplazar',
-  seleccion: Seleccion | null,
-): string {
-  const modoTexto =
-    modo === 'reemplazar'
-      ? 'El diagrama actual está vacío: construí el diagrama COMPLETO desde cero siguiendo la instrucción.'
-      : 'Modo agregar: editá el diagrama actual aplicando solo los cambios pedidos.';
-  const alcance = seleccion
-    ? `\nAlcance: actuá SOLO sobre el elemento seleccionado (${seleccion.kind === 'relacion' ? 'relacion' : 'entidad'}). No modifiques ni elimines otras entidades del diagrama.\n`
-    : '';
-
-  return `Instrucción: ${instruccion}\n\n${modoTexto}${alcance}\n## Diagrama actual (JSON)\n${JSON.stringify(diagrama)}`;
 }
