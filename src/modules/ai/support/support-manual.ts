@@ -99,7 +99,7 @@ export const MANUAL: ManualEntry[] = [
       'La IA detecta las clases, interfaces, atributos, metodos y relaciones, y las coloca en el lienzo. ' +
       'Sobreescribe el diagrama actual (solo OWNER/EDITOR). Formatos: JPG, PNG, etc. Maximo 8 MB.',
     keywords: [
-      /importar.*imagen|imagen.*diagram|foto|screenshot|clases.*imagen/i,
+      /importar.*imagen|imagen.*diagram|foto.*diagram|subir.*foto|screenshot|clases.*imagen/i,
       /detectar.*clases|ocr.*uml|vision/i,
     ],
   },

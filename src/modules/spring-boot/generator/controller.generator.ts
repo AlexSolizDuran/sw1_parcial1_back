@@ -17,10 +17,13 @@ export function generateController(nombre: string, paquete: string): string {
 import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 
 // Controlador REST de ${nombre}: 5 endpoints CRUD
 @RestController
-@RequestMapping("/api/${path}")
+@RequestMapping("/${path}")
+@Tag(name = "${nombre}", description = "CRUD de ${nombre}")
 public class ${nombre}Controller {
 
     private final ${nombre}Service service;
@@ -29,32 +32,37 @@ public class ${nombre}Controller {
         this.service = service;
     }
 
-    // GET /api/${path} -> listar todos
+    // GET /${path} -> listar todos
+    @Operation(summary = "Lista todos los registros de ${nombre}")
     @GetMapping
     public List<${nombre}Response> findAll() {
         return service.findAll();
     }
 
-    // GET /api/${path}/{id} -> obtener uno (404 si no existe)
+    // GET /${path}/{id} -> obtener uno (404 si no existe)
+    @Operation(summary = "Obtiene un ${nombre} por id")
     @GetMapping("/{id}")
     public ${nombre}Response findById(@PathVariable Long id) {
         return service.findById(id);
     }
 
-    // POST /api/${path} -> crear (responde 201)
+    // POST /${path} -> crear (responde 201)
+    @Operation(summary = "Crea un nuevo ${nombre}")
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public ${nombre}Response create(@RequestBody ${nombre}Request req) {
         return service.save(req);
     }
 
-    // PUT /api/${path}/{id} -> actualizar (404 si no existe)
+    // PUT /${path}/{id} -> actualizar (404 si no existe)
+    @Operation(summary = "Actualiza un ${nombre} existente")
     @PutMapping("/{id}")
     public ${nombre}Response update(@PathVariable Long id, @RequestBody ${nombre}Request req) {
         return service.update(id, req);
     }
 
-    // DELETE /api/${path}/{id} -> eliminar (responde 204)
+    // DELETE /${path}/{id} -> eliminar (responde 204)
+    @Operation(summary = "Elimina un ${nombre} por id")
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable Long id) {

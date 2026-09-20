@@ -29,9 +29,15 @@ async function bootstrap() {
     }),
   );
 
-  // Permite peticiones desde el frontend Next.js en localhost:3000
+  // Permite peticiones desde el frontend. En desarrollo se usan los orígenes
+  // locales por defecto; en producción se configura CORS_ORIGIN con la(s)
+  // URL(s) exacta(s) del frontend (separadas por coma). Nunca wildcard.
+  const corsDefault = ['http://localhost:3000', 'http://127.0.0.1:3000'];
+  const corsOrigin = process.env.CORS_ORIGIN
+    ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim())
+    : corsDefault;
   app.enableCors({
-    origin: ['http://localhost:3000', 'http://127.0.0.1:3000'],
+    origin: corsOrigin,
     credentials: true,
   });
 

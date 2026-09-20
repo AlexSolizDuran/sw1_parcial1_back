@@ -31,14 +31,23 @@ import {
   generateCorsConfig,
   generateExceptionHandler,
   generateGitignore,
+  generateMetaController,
   generateNotFoundException,
   generatePom,
   generateProperties,
   generateReadme,
+  generateScreensJson,
   splitPackage,
 } from './generator/project.generator';
 import { generateRepository } from './generator/repository.generator';
+import {
+  claseDesdeId,
+  generateScreenModule,
+  type ScreensContext,
+} from './generator/screen-module.generator';
+import { derivarScreensDeDiagrama } from './screens/screens.deriver';
 import { generateService } from './generator/service.generator';
+import { parseScreens } from './screens/screens.parser';
 
 /** Archivo generado (ruta dentro del proyecto + contenido). */
 export interface GeneratedFile {
@@ -85,7 +94,11 @@ export class SpringBootService {
     const { artifactId } = splitPackage(packageBase);
     const baseJava = `src/main/java/${packageBase.replace(/\./g, '/')}`;
 
-    // Proyecta el snapshot del lienzo al DSL canonico (ids n1/e1...)
+    const files: GeneratedFile[] = [];
+    const modulosPersistentes: string[] = [];
+    let moduloCount = 0;
+
+    // El diagrama se proyecta una sola vez; de el se derivan las screens
     const { resultado } = projectState(dto.snapshot);
     const byId = new Map<string, CanonicalEntity>();
     for (const e of resultado.entidades) byId.set(e.id, e);
@@ -95,77 +108,113 @@ export class SpringBootService {
         .map((e) => e.nombre),
     );
 
-    const files: GeneratedFile[] = [];
-    const modulosPersistentes: string[] = [];
-    let moduloCount = 0;
+    // Fuente de las screens: las explicitas del JSON o las derivadas del diagrama
+    const { screens } = parseScreens(dto.screens);
+    const screensOrigen =
+      screens.length > 0 ? screens : derivarScreensDeDiagrama(resultado);
+    if (screensOrigen.length > 0) {
+      const clasePorId = new Map<string, string>();
+      const paquetePorId = new Map<string, string>();
+      for (const s of screensOrigen) {
+        const clase = claseDesdeId(s.id);
+        clasePorId.set(s.id, clase);
+        paquetePorId.set(s.id, `${packageBase}.${toFolderName(s.id)}`);
+      }
+      const ctx: ScreensContext = {
+        idsGenerados: new Set(screensOrigen.map((s) => s.id)),
+        clasePorId,
+        paquetePorId,
+        packageBase,
+        baseJava,
+      };
+      for (const screen of screensOrigen) {
+        const clase = clasePorId.get(screen.id)!;
+        const moduloFiles = generateScreenModule(screen, ctx);
+        for (const f of moduloFiles) {
+          files.push({ path: f.path, content: f.content });
+        }
+        modulosPersistentes.push(clase);
+        moduloCount += 1;
+      }
+      // Servir la config de screens embebida (GET /meta/screens)
+      files.push({
+        path: 'src/main/resources/screens.json',
+        content: generateScreensJson(screensOrigen),
+      });
+      files.push({
+        path: `${baseJava}/meta/MetaController.java`,
+        content: generateMetaController(packageBase),
+      });
+    } else {
+      // Sin clases (solo interfaces/enums): se usa el flujo UML clasico
+      for (const entidad of resultado.entidades) {
+        const folder = toFolderName(entidad.nombre);
+        const paquete = `${packageBase}.${folder}`;
+        const dir = `${baseJava}/${folder}`;
+        const relaciones = resultado.relaciones.filter(
+          (r) => r.origen === entidad.id || r.destino === entidad.id,
+        );
 
-    for (const entidad of resultado.entidades) {
-      const folder = toFolderName(entidad.nombre);
-      const paquete = `${packageBase}.${folder}`;
-      const dir = `${baseJava}/${folder}`;
-      const relaciones = resultado.relaciones.filter(
-        (r) => r.origen === entidad.id || r.destino === entidad.id,
-      );
+        if (entidad.tipo === 'interface') {
+          files.push({
+            path: `${dir}/${entidad.nombre}.java`,
+            content: generateInterface(entidad, packageBase, folder),
+          });
+          moduloCount += 1;
+          continue;
+        }
+        if (entidad.tipo === 'enumeration') {
+          files.push({
+            path: `${dir}/${entidad.nombre}.java`,
+            content: generateEnum(entidad, packageBase, folder),
+          });
+          moduloCount += 1;
+          continue;
+        }
 
-      if (entidad.tipo === 'interface') {
+        // Clase / abstracta: modulo completo (entity + repo + service + controller + dtos + mapper)
+        const nombre = entidad.nombre;
+        modulosPersistentes.push(nombre);
         files.push({
-          path: `${dir}/${entidad.nombre}.java`,
-          content: generateInterface(entidad, packageBase, folder),
+          path: `${dir}/${nombre}.java`,
+          content: generateEntity(entidad, relaciones, {
+            packageBase,
+            folder,
+            byId,
+            enums,
+          }),
+        });
+        files.push({
+          path: `${dir}/${nombre}Repository.java`,
+          content: generateRepository(nombre, packageBase, folder),
+        });
+        files.push({
+          path: `${dir}/${nombre}Service.java`,
+          content: generateService(nombre, paquete, {
+            packageBase,
+            entidad,
+            relaciones,
+            byId,
+          }),
+        });
+        files.push({
+          path: `${dir}/${nombre}Controller.java`,
+          content: generateController(nombre, paquete),
+        });
+        files.push({
+          path: `${dir}/${nombre}Request.java`,
+          content: generateRequest(entidad, relaciones, byId, enums, paquete),
+        });
+        files.push({
+          path: `${dir}/${nombre}Response.java`,
+          content: generateResponse(entidad, enums, paquete),
+        });
+        files.push({
+          path: `${dir}/${nombre}Mapper.java`,
+          content: generateMapper(entidad, paquete),
         });
         moduloCount += 1;
-        continue;
       }
-      if (entidad.tipo === 'enumeration') {
-        files.push({
-          path: `${dir}/${entidad.nombre}.java`,
-          content: generateEnum(entidad, packageBase, folder),
-        });
-        moduloCount += 1;
-        continue;
-      }
-
-      // Clase / abstracta: modulo completo (entity + repo + service + controller + dtos + mapper)
-      const nombre = entidad.nombre;
-      modulosPersistentes.push(nombre);
-      files.push({
-        path: `${dir}/${nombre}.java`,
-        content: generateEntity(entidad, relaciones, {
-          packageBase,
-          folder,
-          byId,
-          enums,
-        }),
-      });
-      files.push({
-        path: `${dir}/${nombre}Repository.java`,
-        content: generateRepository(nombre, packageBase, folder),
-      });
-      files.push({
-        path: `${dir}/${nombre}Service.java`,
-        content: generateService(nombre, paquete, {
-          packageBase,
-          entidad,
-          relaciones,
-          byId,
-        }),
-      });
-      files.push({
-        path: `${dir}/${nombre}Controller.java`,
-        content: generateController(nombre, paquete),
-      });
-      files.push({
-        path: `${dir}/${nombre}Request.java`,
-        content: generateRequest(entidad, relaciones, byId, enums, paquete),
-      });
-      files.push({
-        path: `${dir}/${nombre}Response.java`,
-        content: generateResponse(entidad, enums, paquete),
-      });
-      files.push({
-        path: `${dir}/${nombre}Mapper.java`,
-        content: generateMapper(entidad, paquete),
-      });
-      moduloCount += 1;
     }
 
     // Archivos base del proyecto (corrible sin nada manual)

@@ -295,7 +295,7 @@ describe('SpringBoot generadores', () => {
       'com.ejemplo.tienda.producto',
     );
     expect(codigo).toContain('@RestController');
-    expect(codigo).toContain('"/api/productos"');
+    expect(codigo).toContain('"/productos"');
     expect(codigo).toContain('@GetMapping');
     expect(codigo).toContain('@PostMapping');
     expect(codigo).toContain('@PutMapping("/{id}")');
@@ -312,7 +312,7 @@ describe('SpringBoot generadores', () => {
 });
 
 describe('SpringBootService.generateModules', () => {
-  it('genera proyecto Maven completo y corrible', async () => {
+  it('sin screens explicitas deriva las screens del diagrama y genera el proyecto', async () => {
     const service = await montarServicio();
 
     const resultado = await service.generateModules('user-1', {
@@ -350,11 +350,11 @@ describe('SpringBootService.generateModules', () => {
 
     const base = 'src/main/java/com/ejemplo/tienda';
     const paths = resultado.files.map((f) => f.path);
-    // Modulo producto con layout Maven
+    // Cada clase del diagrama es una screen: clase Producto -> Productos
     expect(resultado.moduloCount).toBe(2);
-    expect(paths).toContain(`${base}/producto/Producto.java`);
-    expect(paths).toContain(`${base}/producto/ProductoService.java`);
-    expect(paths).toContain(`${base}/producto/ProductoController.java`);
+    expect(paths).toContain(`${base}/productos/Productos.java`);
+    expect(paths).toContain(`${base}/productos/ProductosService.java`);
+    expect(paths).toContain(`${base}/productos/ProductosController.java`);
     // Archivos base del proyecto
     expect(paths).toContain('pom.xml');
     expect(paths).toContain('src/main/resources/application.properties');
@@ -371,13 +371,304 @@ describe('SpringBootService.generateModules', () => {
     expect(readme).toContain('swagger-ui.html');
     expect(readme).toContain('Solucion de problemas');
 
-    // El servicio mapea campos y resuelve la FK sin TODOs
+    // El servicio mapea campos y resuelve la FK de la relacion Producto->Categoria
     const serviceContent =
-      resultado.files.find((f) => f.path.endsWith('ProductoService.java'))
+      resultado.files.find((f) => f.path.endsWith('ProductosService.java'))
         ?.content ?? '';
     expect(serviceContent).toContain('entity.setNombre(req.getNombre())');
-    expect(serviceContent).toContain('CategoriaRepository');
+    expect(serviceContent).toContain('CategoriasRepository');
     expect(serviceContent).toContain('ResourceNotFoundException');
     expect(serviceContent).not.toContain('TODO');
+  });
+});
+
+describe('SpringBootService.generateModules con screens', () => {
+  const screensEjemplo = [
+    {
+      id: 'customers',
+      list: { method: 'GET', path: '/customers' },
+      search: { method: 'GET', path: '/customers/search?q={q}' },
+      create: { method: 'POST', path: '/customers' },
+      update: { method: 'PUT', path: '/customers/{id}' },
+      delete: { method: 'DELETE', path: '/customers/{id}' },
+      searchFields: ['name', 'email'],
+      fields: [
+        { name: 'name', type: 'text', required: true },
+        { name: 'email', type: 'text' },
+        {
+          name: 'category_id',
+          type: 'select',
+          from: { screen: 'categories', of: 'name' },
+        },
+      ],
+    },
+    {
+      id: 'categories',
+      list: { method: 'GET', path: '/categories' },
+      create: { method: 'POST', path: '/categories' },
+      fields: [{ name: 'name', type: 'text', required: true }],
+    },
+  ];
+
+  it('genera un modulo por screen con rutas exactas del JSON (sin /api)', async () => {
+    const service = await montarServicio();
+    const resultado = await service.generateModules('user-1', {
+      diagramId: '11111111-1111-4111-8111-111111111111',
+      snapshot: { nodes: [] },
+      packageBase: 'com.ejemplo.tienda',
+      screens: screensEjemplo,
+    });
+
+    const base = 'src/main/java/com/ejemplo/tienda';
+    const paths = resultado.files.map((f) => f.path);
+    expect(resultado.moduloCount).toBe(2);
+    // Modulo customers
+    expect(paths).toContain(`${base}/customers/Customers.java`);
+    expect(paths).toContain(`${base}/customers/CustomersController.java`);
+    expect(paths).toContain(`${base}/customers/CustomersService.java`);
+    expect(paths).toContain(`${base}/customers/CustomersRepository.java`);
+    // Modulo categories
+    expect(paths).toContain(`${base}/categories/Categories.java`);
+    // Base del proyecto siempre se genera
+    expect(paths).toContain('pom.xml');
+    expect(paths).toContain(`${base}/TiendaApplication.java`);
+
+    // Controller con rutas exactas, sin /api, con GET /{id} y OpenAPI
+    const controller =
+      resultado.files.find((f) =>
+        f.path.endsWith('customers/CustomersController.java'),
+      )?.content ?? '';
+    expect(controller).toContain('@RequestMapping("/customers")');
+    expect(controller).toContain('@GetMapping("/search")');
+    expect(controller).toContain(
+      '@RequestParam(name = "q", required = false) String q',
+    );
+    expect(controller).not.toContain('/api/');
+    // GET /{id}: el movil edita con fetchOne (evita la caida a cache)
+    expect(controller).toContain('@GetMapping("/{id}")');
+    expect(controller).toContain('findById(@PathVariable Long id)');
+    // Metadatos OpenAPI: dan nombres/grupos utiles al movil
+    expect(controller).toContain('@Tag(name = "Customers"');
+    expect(controller).toContain('@Operation(');
+    expect(controller).toContain(
+      'import io.swagger.v3.oas.annotations.Operation;',
+    );
+
+    // Entidad con FK real hacia Categories (@ManyToOne)
+    const entity =
+      resultado.files.find((f) =>
+        f.path.endsWith('customers/Customers.java'),
+      )?.content ?? '';
+    expect(entity).toContain('@ManyToOne');
+    expect(entity).toContain('@JoinColumn(name = "category_id")');
+    expect(entity).toContain('private Categories categoryId;');
+
+    // Response con la FK como id escalar (Long), no objeto anidado
+    const response =
+      resultado.files.find((f) =>
+        f.path.endsWith('customers/CustomersResponse.java'),
+      )?.content ?? '';
+    expect(response).toContain('private Long categoryId;');
+    expect(response).not.toContain('private Categories categoryId;');
+    // El JSON usa el nombre exacto del DSL (snake_case), no el camelCase
+    expect(response).toContain('@JsonProperty("category_id")');
+
+    // Request igual: la FK entra como Long con su nombre del DSL
+    const request =
+      resultado.files.find((f) =>
+        f.path.endsWith('customers/CustomersRequest.java'),
+      )?.content ?? '';
+    expect(request).toContain('private Long categoryId;');
+    expect(request).toContain('@JsonProperty("category_id")');
+    expect(request).not.toContain('private Categories categoryId;');
+
+    // Mapper resuelve el id de la entidad (entity.getCategoryId().getId())
+    const mapper =
+      resultado.files.find((f) =>
+        f.path.endsWith('customers/CustomersMapper.java'),
+      )?.content ?? '';
+    expect(mapper).toContain('entity.getCategoryId().getId()');
+    expect(mapper).not.toContain('Categories');
+
+    // El service resuelve la FK con CategoriesRepository
+    const serviceContent =
+      resultado.files.find((f) =>
+        f.path.endsWith('customers/CustomersService.java'),
+      )?.content ?? '';
+    expect(serviceContent).toContain('CategoriesRepository');
+    expect(serviceContent).toContain('search');
+    expect(serviceContent).toContain('getEmail()');
+  });
+
+  it('expone GET /meta/screens con el screens.json embebido', async () => {
+    const service = await montarServicio();
+    const resultado = await service.generateModules('user-1', {
+      diagramId: '11111111-1111-4111-8111-111111111111',
+      snapshot: { nodes: [] },
+      packageBase: 'com.ejemplo.tienda',
+      screens: screensEjemplo,
+    });
+
+    const json = resultado.files.find((f) =>
+      f.path.endsWith('resources/screens.json'),
+    )?.content;
+    expect(json).toBeDefined();
+    const parsed = JSON.parse(json!);
+    // La app movil espera {"screens":[...]}, no un array plano
+    expect(Array.isArray(parsed)).toBe(false);
+    expect(Array.isArray(parsed.screens)).toBe(true);
+    expect(parsed.screens[0].id).toBe('customers');
+    // Rutas sin /api
+    expect(parsed.screens[0].list.path).toBe('/customers');
+
+    const meta =
+      resultado.files.find((f) =>
+        f.path.endsWith('meta/MetaController.java'),
+      )?.content ?? '';
+    expect(meta).toContain('@RequestMapping("/meta")');
+    expect(meta).toContain('@GetMapping(value = "/screens"');
+    expect(meta).not.toContain('/api/');
+  });
+
+  it('normaliza rutas con /api y respeta list/search/create/update/delete', () => {
+    const { normalizarPath } = require('./screens/screens.parser');
+    expect(normalizarPath('/api/customers')).toBe('/customers');
+    expect(normalizarPath('customers')).toBe('/customers');
+    expect(normalizarPath('/customers/')).toBe('/customers');
+  });
+});
+
+describe('screens.deriver (diagrama -> screens)', () => {
+  const { derivarScreensDeDiagrama } = require('./screens/screens.deriver');
+
+  it('genera 1 screen por clase con rutas plurales sin /api', () => {
+    const screens = derivarScreensDeDiagrama({
+      entidades: [
+        {
+          id: 'n1',
+          tipo: 'class',
+          nombre: 'Producto',
+          atributos: [{ visibilidad: 'private', nombre: 'nombre', tipo: 'String' }],
+          metodos: [],
+        },
+        {
+          id: 'n2',
+          tipo: 'class',
+          nombre: 'Categoria',
+          atributos: [],
+          metodos: [],
+        },
+      ],
+      relaciones: [],
+    });
+    expect(screens).toHaveLength(2);
+    expect(screens[0].id).toBe('productos');
+    expect(screens[0].list.path).toBe('/productos');
+    expect(screens[0].list.method).toBe('GET');
+    expect(screens[0].create.path).toBe('/productos');
+    expect(screens[0].update.path).toBe('/productos/{id}');
+    expect(screens[0].delete.path).toBe('/productos/{id}');
+    expect(screens[0].fields[0].name).toBe('nombre');
+    expect(screens[0].fields[0].type).toBe('text');
+  });
+
+  it('convierte una relacion 1..* en FK hacia la otra screen', () => {
+    const screens = derivarScreensDeDiagrama({
+      entidades: [
+        {
+          id: 'n1',
+          tipo: 'class',
+          nombre: 'Venta',
+          atributos: [{ visibilidad: 'private', nombre: 'total', tipo: 'double' }],
+          metodos: [],
+        },
+        {
+          id: 'n2',
+          tipo: 'class',
+          nombre: 'Cliente',
+          atributos: [{ visibilidad: 'private', nombre: 'email', tipo: 'String' }],
+          metodos: [],
+        },
+      ],
+      relaciones: [
+        {
+          id: 'e1',
+          tipo: 'association',
+          origen: 'n2',
+          destino: 'n1',
+          multiplicidadOrigen: '1',
+          multiplicidadDestino: '*',
+        },
+      ],
+    });
+    const venta = screens.find((s) => s.id === 'ventas')!;
+    // Venta es el lado "muchos": lleva la FK hacia clientes
+    const fk = venta.fields.find((f) => f.type === 'select');
+    expect(fk).toBeTruthy();
+    expect(fk!.from?.screen).toBe('clientes');
+    expect(fk!.from?.of).toBe('email');
+    expect(fk!.from?.idField).toBe('id');
+    expect(venta.fields[0].type).toBe('number'); // total (double)
+  });
+
+  it('ignora interfaces, enumeraciones y dependencias para las screens', () => {
+    const screens = derivarScreensDeDiagrama({
+      entidades: [
+        { id: 'n1', tipo: 'interface', nombre: 'Repositorio', atributos: [], metodos: [] },
+        {
+          id: 'n2',
+          tipo: 'enumeration',
+          nombre: 'Estado',
+          atributos: [],
+          metodos: [],
+          literales: ['ABIERTO', 'CERRADO'],
+        },
+        { id: 'n3', tipo: 'class', nombre: 'Orden', atributos: [], metodos: [] },
+      ],
+      relaciones: [
+        {
+          id: 'e1',
+          tipo: 'dependency',
+          origen: 'n3',
+          destino: 'n1',
+        },
+      ],
+    });
+    expect(screens).toHaveLength(1);
+    expect(screens[0].id).toBe('ordenes');
+    // La dependencia hacia la interfaz no genera FK
+    expect(screens[0].fields.some((f) => f.type === 'select')).toBe(false);
+  });
+
+  it('resuelve un atributo de enumeracion como select con sus literales', () => {
+    const screens = derivarScreensDeDiagrama({
+      entidades: [
+        {
+          id: 'n1',
+          tipo: 'enumeration',
+          nombre: 'Estado',
+          atributos: [],
+          metodos: [],
+          literales: ['ACTIVO', 'INACTIVO'],
+        },
+        {
+          id: 'n2',
+          tipo: 'class',
+          nombre: 'Pedido',
+          atributos: [
+            { visibilidad: 'private', nombre: 'estado', tipo: 'Estado' },
+          ],
+          metodos: [],
+        },
+      ],
+      relaciones: [],
+    });
+    const pedido = screens.find((s) => s.id === 'pedidos')!;
+    const estado = pedido.fields.find((f) => f.name === 'estado')!;
+    expect(estado.type).toBe('select');
+    expect(estado.options).toEqual([
+      { value: 'ACTIVO', label: 'ACTIVO' },
+      { value: 'INACTIVO', label: 'INACTIVO' },
+    ]);
   });
 });

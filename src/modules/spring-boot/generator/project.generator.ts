@@ -5,6 +5,7 @@
  * Con esto el ZIP se ejecuta con solo `mvn spring-boot:run`.
  */
 import { capitalizar, toPluralPath } from './java-types';
+import type { ScreenConfig } from '../screens/screens.types';
 
 /** Nombre de la base de datos Postgres que usa el proyecto generado. */
 export const DB_NAME = 'mi_proyecto';
@@ -195,7 +196,7 @@ public class CorsConfig implements WebMvcConfigurer {
 
     @Override
     public void addCorsMappings(CorsRegistry registry) {
-        registry.addMapping("/api/**")
+        registry.addMapping("/**")
             .allowedOrigins("http://localhost:3000", "http://127.0.0.1:3000")
             .allowedMethods("GET", "POST", "PUT", "DELETE");
     }
@@ -215,6 +216,56 @@ export function generateGitignore(): string {
 }
 
 /**
+ * Serializa las screens normalizadas a un screens.json embebido.
+ * Es lo que sirve GET /meta/screens: la config tal como se genero
+ * (rutas sin /api, campos tipados, FKs via `from`).
+ * La app movil espera el objeto {"screens":[...]} (no un array plano).
+ * @param screens - Screens normalizadas por el parser
+ * @returns Contenido JSON formateado (2 espacios)
+ */
+export function generateScreensJson(screens: ScreenConfig[]): string {
+  return JSON.stringify({ screens }, null, 2) + '\n';
+}
+
+/**
+ * Genera el controller /meta/screens: devuelve el screens.json embebido
+ * (config que el frontend del proyecto generado puede consumir para
+ * renderizar los listados/formularios dinamicos sin conocer el codigo).
+ * @param packageBase - Paquete base
+ * @returns Codigo Java del controller
+ */
+export function generateMetaController(packageBase: string): string {
+  return `package ${packageBase}.meta;
+
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.core.io.Resource;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+
+// Sirve la config de los modulos (screens.json embebido) en GET /meta/screens
+@RestController
+@RequestMapping("/meta")
+public class MetaController {
+
+    @GetMapping(value = "/screens", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<String> screens() throws IOException {
+        Resource resource = new ClassPathResource("screens.json");
+        if (!resource.exists()) {
+            return ResponseEntity.notFound().build();
+        }
+        String json = new String(resource.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        return ResponseEntity.ok(json);
+    }
+}
+`;
+}
+
+/**
  * Genera el README con pasos para correr, ejemplos y solucion de problemas.
  * @param artifactId - Nombre del proyecto/BD
  * @param modulos - Nombres de las entidades generadas
@@ -225,7 +276,7 @@ export function generateReadme(artifactId: string, modulos: string[]): string {
   const lineas = modulos
     .map(
       (m) =>
-        `- \`/api/${toPluralPath(m)}\` — CRUD de ${m} (GET, GET by id, POST, PUT, DELETE)`,
+        `- \`/${toPluralPath(m)}\` — CRUD de ${m} (GET, GET by id, POST, PUT, DELETE)`,
     )
     .join('\n');
   return `# ${capitalizar(artifactId)} — Backend Spring Boot generado
@@ -256,26 +307,28 @@ Veras en consola los \`CREATE TABLE\` de Hibernate y al final
 
 \`\`\`bash
 # Crear (201)
-curl -X POST localhost:8080/api/${toPluralPath(primero)} \\
+curl -X POST localhost:8080/${toPluralPath(primero)} \\
   -H "Content-Type: application/json" \\
   -d '{}'
 
 # Listar
-curl localhost:8080/api/${toPluralPath(primero)}
+curl localhost:8080/${toPluralPath(primero)}
 
 # Obtener uno (404 si no existe)
-curl localhost:8080/api/${toPluralPath(primero)}/1
+curl localhost:8080/${toPluralPath(primero)}/1
 
 # Actualizar
-curl -X PUT localhost:8080/api/${toPluralPath(primero)}/1 \\
+curl -X PUT localhost:8080/${toPluralPath(primero)}/1 \\
   -H "Content-Type: application/json" \\
   -d '{}'
 
 # Eliminar (204)
-curl -X DELETE localhost:8080/api/${toPluralPath(primero)}/1
+curl -X DELETE localhost:8080/${toPluralPath(primero)}/1
 \`\`\`
 
 ## Endpoints
+
+- \`GET /meta/screens\` — config JSON de los modulos (para renderizar el front)
 
 ${lineas}
 
@@ -288,7 +341,7 @@ ${lineas}
 - \`<modulo>/<Modulo>.java\` — @Entity JPA (una carpeta por tabla)
 - \`<modulo>/<Modulo>Repository.java\` — Spring Data (sin codigo)
 - \`<modulo>/<Modulo>Service.java\` — CRUD + resolucion de FKs por id
-- \`<modulo>/<Modulo>Controller.java\` — REST /api/...
+- \`<modulo>/<Modulo>Controller.java\` — REST /...
 - \`<modulo>/<Modulo>Request.java\` — lo que recibe POST/PUT (FKs como ids)
 - \`<modulo>/<Modulo>Response.java\` — lo que devuelve GET (con id)
 - \`common/\` — error 404 en JSON · \`config/\` — CORS para localhost:3000
