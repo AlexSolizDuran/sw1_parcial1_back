@@ -111,10 +111,14 @@ export class AuthController {
    * @param token - Token JWT firmado
    */
   private setAuthCookie(res: Response, token: string) {
+    const produccion = process.env.NODE_ENV === 'production';
     res.cookie(ACCESS_TOKEN_COOKIE, token, {
       httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
+      // En produccion el front (Vercel) y el backend (Render) son origenes
+      // distintos: SameSite=None + Secure es obligatorio para que el
+      // navegador envie la cookie en requests cross-site (fetch y Socket.IO).
+      sameSite: produccion ? 'none' : 'lax',
+      secure: produccion,
       maxAge: SESSION_MS,
       path: '/',
     });
@@ -125,6 +129,11 @@ export class AuthController {
    * @param res - Respuesta express
    */
   private clearAuthCookie(res: Response) {
-    res.clearCookie(ACCESS_TOKEN_COOKIE, { path: '/' });
+    const produccion = process.env.NODE_ENV === 'production';
+    res.clearCookie(ACCESS_TOKEN_COOKIE, {
+      path: '/',
+      sameSite: produccion ? 'none' : 'lax',
+      secure: produccion,
+    });
   }
 }
