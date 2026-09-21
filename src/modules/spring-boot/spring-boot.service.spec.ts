@@ -380,6 +380,8 @@ describe('SpringBoot generadores', () => {
     expect(generateProperties()).toContain(
       'jdbc:postgresql://localhost:5433/mi_proyecto',
     );
+    // Puerto fijo 8081 (la app movil lo usa hardcodeado)
+    expect(generateProperties()).toContain('server.port=8081');
   });
 });
 

@@ -103,6 +103,8 @@ spring.datasource.password=postgres
 spring.jpa.hibernate.ddl-auto=update
 spring.jpa.show-sql=true
 spring.jpa.properties.hibernate.format_sql=true
+# Puerto fijo del API: la app movil lo usa hardcodeado (8081)
+server.port=8081
 `;
 }
 
@@ -179,7 +181,7 @@ public class GlobalExceptionHandler {
 
 /**
  * Genera la config CORS para que el front Next.js (puerto 3000)
- * pueda llamar al API (puerto 8080).
+ * pueda llamar al API (puerto 8081).
  * @param packageBase - Paquete base
  * @returns Codigo Java de la config
  */
@@ -301,29 +303,30 @@ mvn spring-boot:run
 \`\`\`
 
 Veras en consola los \`CREATE TABLE\` de Hibernate y al final
-\`Started ...Application in X seconds\`. El API queda en http://localhost:8080.
+\`Started ...Application in X seconds\`. El API queda en http://localhost:8081
+(el puerto lo fija \`server.port=8081\` en \`application.properties\`).
 
 ## Probarlo (ejemplo con ${primero})
 
 \`\`\`bash
 # Crear (201)
-curl -X POST localhost:8080/${toPluralPath(primero)} \\
+curl -X POST localhost:8081/${toPluralPath(primero)} \\
   -H "Content-Type: application/json" \\
   -d '{}'
 
 # Listar
-curl localhost:8080/${toPluralPath(primero)}
+curl localhost:8081/${toPluralPath(primero)}
 
 # Obtener uno (404 si no existe)
-curl localhost:8080/${toPluralPath(primero)}/1
+curl localhost:8081/${toPluralPath(primero)}/1
 
 # Actualizar
-curl -X PUT localhost:8080/${toPluralPath(primero)}/1 \\
+curl -X PUT localhost:8081/${toPluralPath(primero)}/1 \\
   -H "Content-Type: application/json" \\
   -d '{}'
 
 # Eliminar (204)
-curl -X DELETE localhost:8080/${toPluralPath(primero)}/1
+curl -X DELETE localhost:8081/${toPluralPath(primero)}/1
 \`\`\`
 
 ## Endpoints
@@ -343,7 +346,7 @@ ${lineas}
 
 ## Documentacion interactiva
 
-- Swagger UI: http://localhost:8080/swagger-ui.html (probar cada endpoint desde el navegador)
+- Swagger UI: http://localhost:8081/swagger-ui.html (probar cada endpoint desde el navegador)
 
 ## Estructura
 
@@ -362,7 +365,7 @@ ${lineas}
 | \`Connection to localhost:${DB_PORT} refused\` | Postgres no esta corriendo en el puerto ${DB_PORT}: inicia tu servicio local o usa \`docker compose up -d\` (ver docker-compose.yml) |
 | \`database "${DB_NAME}" does not exist\` | Falta el paso 1: \`psql -h localhost -p ${DB_PORT} -U postgres -c "CREATE DATABASE ${DB_NAME};"\` |
 | \`password authentication failed\` | Ajusta \`spring.datasource.username/password\` en \`src/main/resources/application.properties\` |
-| \`Port 8080 already in use\` | Otro proceso usa el puerto: detenlo o corre con \`mvn spring-boot:run -Dspring-boot.run.jvmArguments="-Dserver.port=8081"\` |
+| \`Port 8081 already in use\` | Otro proceso ocupa el puerto fijo (8081): detenlo o cambia \`server.port\` en el \`application.properties\` |
 | Las tablas no aparecen | Revisa que \`spring.jpa.hibernate.ddl-auto=update\` siga en el properties y mira el log de arranque |
 | El front (puerto 3000) da CORS | \`config/CorsConfig.java\` ya permite localhost:3000; si tu front usa otro origen, agregalo ahi |
 `;
