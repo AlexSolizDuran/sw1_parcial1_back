@@ -73,6 +73,11 @@ export class VisionService {
       throw error;
     }
 
+    // 1b. El microservicio omite "ret" en metodos que no declaran tipo de
+    //     retorno; el contrato canonico usa "void" por defecto. Se normaliza
+    //     antes de validar para no rechazar un diagrama valido con 502.
+    crudo = normalizarSalidaVision(crudo);
+
     // 2. Validacion del contrato del microservicio
     let deseado: CanonicalDiagram;
     try {
@@ -154,4 +159,42 @@ export class VisionService {
       throw new BadRequestException('El campo "snapshot" no es un JSON valido');
     }
   }
+}
+
+/**
+ * True si el valor es un objeto plano (no array, no null).
+ * Replica la guarda de dsl/validate.ts sin exponerla.
+ */
+function esObjetoPlano(valor: unknown): valor is Record<string, unknown> {
+  return typeof valor === 'object' && valor !== null && !Array.isArray(valor);
+}
+
+/**
+ * Normaliza la salida cruda del microservicio de vision antes de validarla.
+ * El Space no envia el campo "ret" en los metodos; el contrato canonico
+ * (CanonicalMethod.ret) espera al menos una cadena vacia/invalida como "void".
+ * @param valor - JSON crudo devuelto por el microservicio
+ * @returns El mismo objeto con "ret: void" inyectado en los metodos que faltan
+ */
+function normalizarSalidaVision(valor: unknown): unknown {
+  if (!esObjetoPlano(valor)) return valor;
+  const entidades = Array.isArray(valor.entidades) ? valor.entidades : [];
+  return {
+    ...valor,
+    entidades: entidades.map((entidad) => {
+      if (!esObjetoPlano(entidad)) return entidad;
+      const metodos = Array.isArray(entidad.metodos) ? entidad.metodos : [];
+      if (metodos.length === 0) return entidad;
+      return {
+        ...entidad,
+        metodos: metodos.map((metodo) => {
+          if (!esObjetoPlano(metodo)) return metodo;
+          const ret = metodo.ret;
+          if (typeof ret === 'string' && ret.trim() !== '') return metodo;
+          // Sin tipo de retorno declarado: el DSL canonico usa "void"
+          return { ...metodo, ret: 'void' };
+        }),
+      };
+    }),
+  };
 }
