@@ -23,6 +23,17 @@ interface JoinRoomPayload {
 }
 
 /**
+ * Origenes permitidos por CORS para el gateway Socket.IO.
+ * Se leen de CORS_ORIGIN (mismo env que main.ts), separados por coma.
+ * Si no esta definida, se usan los origenes locales por defecto
+ * (localhost:3000), igual que en desarrollo. Nunca wildcard porque la
+ * conexion Socket.IO usa credentials (cookie HttpOnly del JWT).
+ */
+const corsOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim())
+  : ['http://localhost:3000', 'http://127.0.0.1:3000'];
+
+/**
  * Gateway de colaboracion en tiempo real con Socket.IO.
  *
  * Actua como un relay del protocolo de sincronizacion de Yjs:
@@ -36,7 +47,7 @@ interface JoinRoomPayload {
 @WebSocketGateway({
   namespace: '/collab',
   cors: {
-    origin: ['http://localhost:3000', 'http://127.0.0.1:3000'],
+    origin: corsOrigins,
     credentials: true,
   },
 })
