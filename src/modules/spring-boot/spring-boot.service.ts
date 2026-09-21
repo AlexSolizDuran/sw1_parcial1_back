@@ -35,6 +35,7 @@ import {
   generateNotFoundException,
   generatePom,
   generateProperties,
+  generateMavenConfig,
   generateReadme,
   generateScreensJson,
   splitPackage,
@@ -219,6 +220,13 @@ export class SpringBootService {
 
     // Archivos base del proyecto (corrible sin nada manual)
     files.push({ path: 'pom.xml', content: generatePom(packageBase) });
+    // Config de Maven a nivel proyecto (.mvn/): hace que "mvn spring-boot:run"
+    // compile con el javac del sistema aunque Maven corra sobre un JDK sin javac
+    // (evita el error "release version X not supported" sin tocar el SO).
+    files.push({
+      path: '.mvn/maven.config',
+      content: generateMavenConfig(),
+    });
     files.push({
       path: 'src/main/resources/application.properties',
       content: generateProperties(),

@@ -52,6 +52,9 @@ export function generatePom(packageBase: string): string {
   <version>0.0.1-SNAPSHOT</version>
   <properties>
     <java.version>17</java.version>
+    <!-- Fija el compilador a 17: evita "release version X not supported"
+         si Maven corre con un JDK distinto al del proyecto -->
+    <maven.compiler.release>17</maven.compiler.release>
   </properties>
   <dependencies>
     <dependency>
@@ -105,6 +108,22 @@ spring.jpa.show-sql=true
 spring.jpa.properties.hibernate.format_sql=true
 # Puerto fijo del API: la app movil lo usa hardcodeado (8081)
 server.port=8081
+`;
+}
+
+/**
+ * Configura Maven a nivel del proyecto generado (.mvn/maven.config):
+ * fuerza el uso del javac externo del sistema con fork. Con esto
+ * "mvn spring-boot:run" compila y corre sin depender de JAVA_HOME ni
+ * de modificaciones al sistema operativo (resuelve "release version X
+ * not supported" cuando el JDK por defecto no trae javac o es un JRE).
+ * @returns Contenido de .mvn/maven.config
+ */
+export function generateMavenConfig(): string {
+  return `--batch-mode
+-Dmaven.compiler.fork=true
+-Dmaven.compiler.forceJavacCompilerUse=true
+-Dmaven.compiler.executable=/usr/bin/javac
 `;
 }
 
@@ -299,7 +318,10 @@ psql -h localhost -p ${DB_PORT} -U postgres -c "CREATE DATABASE ${DB_NAME};"
 
 # 2. Entrar al proyecto y correr
 cd ${artifactId}
-mvn spring-boot:run
+# Recomendado: fija el JDK 17 de este proyecto aun si tu sistema trae otro
+# JDK por defecto (evita el error "release version X not supported").
+JAVA_HOME="$HOME/jdks/jdk-17.0.20.1+1" mvn spring-boot:run
+# Si tu Java por defecto ya es 17, basta con: mvn spring-boot:run
 \`\`\`
 
 Veras en consola los \`CREATE TABLE\` de Hibernate y al final
