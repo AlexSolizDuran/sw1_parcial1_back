@@ -112,6 +112,78 @@ describe('SpringBoot generadores', () => {
     expect(codigo).not.toContain('lombok');
   });
 
+  it('el atributo id (id/Id/ID) del diagrama se absorbe en la PK Long y no se duplica', () => {
+    for (const nombre of ['id', 'Id', 'ID']) {
+      const producto: CanonicalEntity = {
+        ...entidadBase('n1', 'Producto'),
+        atributos: [
+          { visibilidad: 'private', nombre, tipo: 'String' },
+          { visibilidad: 'private', nombre: 'nombre', tipo: 'String' },
+        ],
+      };
+      const codigo = generateEntity(producto, [], {
+        packageBase: 'com.ejemplo.tienda',
+        folder: 'producto',
+        byId: new Map<string, CanonicalEntity>([['n1', producto]]),
+        enums: new Set(),
+      });
+      // La PK Long auto-generada permanece, sin importar el tipo declarado
+      expect(codigo).toContain('@Id');
+      expect(codigo).toContain(
+        '@GeneratedValue(strategy = GenerationType.IDENTITY)',
+      );
+      expect(codigo.match(/private Long id;/g)).toHaveLength(1);
+      expect(codigo).not.toContain('private String id;');
+    }
+  });
+
+  it('Request sin id y Response con UN solo Long id', () => {
+    const producto: CanonicalEntity = {
+      ...entidadBase('n1', 'Producto'),
+      atributos: [
+        { visibilidad: 'private', nombre: 'ID', tipo: 'String' },
+        { visibilidad: 'private', nombre: 'nombre', tipo: 'String' },
+      ],
+    };
+    const byId = new Map<string, CanonicalEntity>([['n1', producto]]);
+    // El body del POST/PUT no pide la PK: la BD la genera
+    const request = generateRequest(
+      producto,
+      [],
+      byId,
+      new Set(),
+      'com.ejemplo.tienda.producto',
+    );
+    expect(request).toContain('private String nombre;');
+    expect(request).not.toMatch(/private \w+ id;/);
+    // El Response expone la PK una sola vez (Long)
+    const response = generateResponse(
+      producto,
+      new Set(),
+      'com.ejemplo.tienda.producto',
+    );
+    expect(response.match(/private Long id;/g)).toHaveLength(1);
+    expect(response).not.toContain('private String id;');
+  });
+
+  it('el service no copia el id desde el Request (la BD lo genera)', () => {
+    const producto: CanonicalEntity = {
+      ...entidadBase('n1', 'Producto'),
+      atributos: [
+        { visibilidad: 'private', nombre: 'id', tipo: 'String' },
+        { visibilidad: 'private', nombre: 'nombre', tipo: 'String' },
+      ],
+    };
+    const codigo = generateService('Producto', 'com.ejemplo.tienda.producto', {
+      packageBase: 'com.ejemplo.tienda',
+      entidad: producto,
+      relaciones: [],
+      byId: new Map<string, CanonicalEntity>([['n1', producto]]),
+    });
+    expect(codigo).not.toContain('setId(');
+    expect(codigo).toContain('entity.setNombre(req.getNombre())');
+  });
+
   it('genera composicion Venta -> DetalleVenta con cascade', () => {
     const venta = entidadBase('n1', 'Venta');
     const detalle = entidadBase('n2', 'DetalleVenta');
@@ -535,6 +607,48 @@ describe('SpringBootService.generateModules con screens', () => {
     expect(normalizarPath('/api/customers')).toBe('/customers');
     expect(normalizarPath('customers')).toBe('/customers');
     expect(normalizarPath('/customers/')).toBe('/customers');
+  });
+
+  it('un field id (String) del screen se absorbe en la PK Long sin duplicar', async () => {
+    const service = await montarServicio();
+    const resultado = await service.generateModules('user-1', {
+      diagramId: '11111111-1111-4111-8111-111111111111',
+      snapshot: { nodes: [] },
+      packageBase: 'com.ejemplo.tienda',
+      screens: [
+        {
+          id: 'productos',
+          list: { method: 'GET', path: '/productos' },
+          create: { method: 'POST', path: '/productos' },
+          update: { method: 'PUT', path: '/productos/{id}' },
+          delete: { method: 'DELETE', path: '/productos/{id}' },
+          searchFields: ['nombre'],
+          fields: [
+            { name: 'id', type: 'text' },
+            { name: 'nombre', type: 'text', required: true },
+          ],
+        },
+      ],
+    });
+
+    const base = 'src/main/java/com/ejemplo/tienda/productos';
+    const ent = (nombre: string) =>
+      resultado.files.find((f) => f.path === `${base}/${nombre}.java`)?.content ??
+      '';
+    const entity = ent('Productos');
+    // PK Long unica, automatica, sin columnas duplicadas
+    expect(entity.match(/private Long id;/g)).toHaveLength(1);
+    expect(entity).not.toContain('private String id;');
+    expect(entity).toContain(
+      '@GeneratedValue(strategy = GenerationType.IDENTITY)',
+    );
+    // Response: un solo id Long
+    expect(ent('ProductosResponse').match(/private Long id;/g)).toHaveLength(1);
+    expect(ent('ProductosResponse')).not.toContain('private String id;');
+    // Request: sin id (lo genera la BD), con el resto de campos
+    const request = ent('ProductosRequest');
+    expect(request).toContain('private String nombre;');
+    expect(request).not.toMatch(/private \w+ id;/);
   });
 });
 

@@ -11,6 +11,7 @@ import type {
 import {
   EnumNames,
   capitalizar,
+  esNombreId,
   importsForTypes,
   toCamelCase,
   toJavaType,
@@ -82,7 +83,11 @@ export function generateRequest(
 ): string {
   const nombre = entidad.nombre;
   const campos: Array<{ tipo: string; nombre: string }> = [];
-  for (const attr of entidad.atributos.filter((a) => !a.estatico)) {
+  // El atributo `id` del diagrama es la PK auto-generada: no va en el body
+  // del POST/PUT (la BD lo genera), asi el Request nunca lo duplica.
+  for (const attr of entidad.atributos.filter(
+    (a) => !a.estatico && !esNombreId(a.nombre),
+  )) {
     campos.push({ tipo: toJavaType(attr.tipo, enums), nombre: attr.nombre });
   }
   // Las relaciones ManyToOne/OneToOne entran como <campo>Id
@@ -151,7 +156,11 @@ export function generateResponse(
   const campos: Array<{ tipo: string; nombre: string }> = [
     { tipo: 'Long', nombre: 'id' },
   ];
-  for (const attr of entidad.atributos.filter((a) => !a.estatico)) {
+  // El atributo `id` del diagrama se absorbe en el campo PK de arriba:
+  // solo debe verse UN unico id en el Response.
+  for (const attr of entidad.atributos.filter(
+    (a) => !a.estatico && !esNombreId(a.nombre),
+  )) {
     campos.push({ tipo: toJavaType(attr.tipo, enums), nombre: attr.nombre });
   }
   const declaracion = campos

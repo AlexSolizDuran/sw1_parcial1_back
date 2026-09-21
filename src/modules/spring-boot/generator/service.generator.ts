@@ -8,7 +8,7 @@ import type {
   CanonicalEntity,
   CanonicalRelation,
 } from '../../ai/dsl/canonical';
-import { capitalizar, toCamelCase, toFolderName } from './java-types';
+import { capitalizar, esNombreId, toCamelCase, toFolderName } from './java-types';
 
 /** FK que el servicio debe resolver (lado con @JoinColumn). */
 interface Fk {
@@ -96,7 +96,11 @@ export function generateService(
   ctx: ServiceContext,
 ): string {
   const fks = calcularFks(ctx);
-  const propios = ctx.entidad.atributos.filter((a) => !a.estatico);
+  // El atributo `id` del diagrama es la PK: nada que copiar desde el Request
+  // (el valor lo genera la BD con IDENTITY).
+  const propios = ctx.entidad.atributos.filter(
+    (a) => !a.estatico && !esNombreId(a.nombre),
+  );
 
   // Declaracion e inyeccion de repos (propio + uno por FK)
   const camposRepo = [

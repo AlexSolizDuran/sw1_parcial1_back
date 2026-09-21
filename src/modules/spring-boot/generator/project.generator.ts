@@ -332,6 +332,15 @@ curl -X DELETE localhost:8080/${toPluralPath(primero)}/1
 
 ${lineas}
 
+## Llave primaria
+
+- Cada tabla usa una PK auto-generada \`Long\` (\`@GeneratedValue IDENTITY\`).
+- Si una clase del diagrama tiene un atributo llamado \`id\` (en cualquier
+  mayuscula: \`id\`, \`Id\`, \`ID\`), ese atributo ES la PK: se absorbe en ese
+  \`Long\` auto-generado, no se duplica como columna y no va en el body del
+  POST/PUT (el valor lo crea la BD). Si su tipo declarado no es numerico,
+  tambien se fuerza a \`Long\`.
+
 ## Documentacion interactiva
 
 - Swagger UI: http://localhost:8080/swagger-ui.html (probar cada endpoint desde el navegador)

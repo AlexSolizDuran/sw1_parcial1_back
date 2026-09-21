@@ -3,6 +3,7 @@
  * Un archivo por tabla: <Nombre>Mapper.java (metodos estaticos toResponse).
  */
 import type { CanonicalEntity } from '../../ai/dsl/canonical';
+import { esNombreId } from './java-types';
 
 /**
  * Genera el mapper de una entidad.
@@ -16,7 +17,7 @@ export function generateMapper(
 ): string {
   const nombre = entidad.nombre;
   const asignaciones = entidad.atributos
-    .filter((a) => !a.estatico)
+    .filter((a) => !a.estatico && !esNombreId(a.nombre))
     .map(
       (a) =>
         `        res.set${capitalizar(a.nombre)}(entity.get${capitalizar(a.nombre)}());`,

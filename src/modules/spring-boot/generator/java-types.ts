@@ -69,6 +69,17 @@ export function capitalizar(texto: string): string {
   return texto.charAt(0).toUpperCase() + texto.slice(1);
 }
 
+/**
+ * Indica si un nombre de atributo corresponde a la llave primaria.
+ * Case-insensitive: se aceptan id, Id, ID, iD. La PK siempre se genera como
+ * Long autoincremental (@GeneratedValue IDENTITY); el atributo del diagrama
+ * que haga match se "absorbe" en ese campo y queda SIN duplicar.
+ */
+export function esNombreId(nombre: string | undefined): boolean {
+  if (!nombre) return false;
+  return nombre.trim().toLowerCase() === 'id';
+}
+
 /** Convierte "DetalleVenta" en "detalleVenta" (nombre de campo). */
 export function toCamelCase(name: string): string {
   if (name.length === 0) return name;

@@ -58,6 +58,16 @@ export function nombreCampo(name: string): string {
 }
 
 /**
+ * Indica si un field de la screen es el id (PK), comparado con idField de
+ * forma case-insensitive. Ese field se absorbe en la PK Long
+ * (`@GeneratedValue IDENTITY`) y NO se genera como columna ni en los DTOs,
+ * evitando el duplicado que romperia la compilacion.
+ */
+function esFieldId(f: ScreenField, idField: string): boolean {
+  return nombreCampo(f.name).toLowerCase() === idField.toLowerCase();
+}
+
+/**
  * Anotacion @JsonProperty para que el JSON de entrada/salida use el nombre
  * EXACTO del DSL (ej. `category_id`), no el camelCase de Java.
  * El movil lee/escribe con `field.name`, asi el contrato es 1:1.
@@ -248,7 +258,9 @@ function generarEntidad(
 ): string {
   const tabla = screen.id;
   const idField = screen.idField ?? 'id';
-  const campos = screen.fields.filter((f) => f.type !== 'array');
+  const campos = screen.fields.filter(
+    (f) => f.type !== 'array' && !esFieldId(f, idField),
+  );
   const lineas: string[] = [
     '    @Id',
     '    @GeneratedValue(strategy = GenerationType.IDENTITY)',
@@ -386,8 +398,9 @@ function generarRequest(
   embebidas: string[],
   ctx: ScreensContext,
 ): string {
+  const idField = screen.idField ?? 'id';
   const campos = screen.fields.filter(
-    (f) => f.type !== 'array' && f.readOnly !== true,
+    (f) => f.type !== 'array' && f.readOnly !== true && !esFieldId(f, idField),
   );
   const declaracion: string[] = [];
   const imports = new Set<string>();
@@ -474,7 +487,9 @@ function generarResponse(
   ctx: ScreensContext,
 ): string {
   const idField = screen.idField ?? 'id';
-  const campos = screen.fields.filter((f) => f.type !== 'array');
+  const campos = screen.fields.filter(
+    (f) => f.type !== 'array' && !esFieldId(f, idField),
+  );
   const declaracion: string[] = [`    private Long ${idField};`];
   const imports = new Set<string>();
   const usaJsonProperty = campos.some((f) => nombreCampo(f.name) !== f.name);
@@ -547,7 +562,9 @@ function generarMapper(
   ctx: ScreensContext,
 ): string {
   const idField = screen.idField ?? 'id';
-  const campos = screen.fields.filter((f) => f.type !== 'array');
+  const campos = screen.fields.filter(
+    (f) => f.type !== 'array' && !esFieldId(f, idField),
+  );
   const lineas: string[] = [`        res.set${capitalizar(idField)}(entity.get${capitalizar(idField)}());`];
   for (const f of campos) {
     const nombreJava = nombreCampo(f.name);
@@ -635,7 +652,11 @@ function generarService(
   const idField = screen.idField ?? 'id';
   const fks = calcularFks(screen, ctx);
   const camposSimples = screen.fields.filter(
-    (f) => f.type !== 'array' && !esFkValida(f, ctx) && f.readOnly !== true,
+    (f) =>
+      f.type !== 'array' &&
+      !esFkValida(f, ctx) &&
+      f.readOnly !== true &&
+      !esFieldId(f, idField),
   );
   const camposArray = screen.fields.filter((f) => f.type === 'array');
 

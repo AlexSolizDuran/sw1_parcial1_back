@@ -14,6 +14,7 @@ import type {
 import {
   EnumNames,
   capitalizar,
+  esNombreId,
   importsForTypes,
   isMany,
   toCamelCase,
@@ -68,8 +69,12 @@ export function generateEntity(
     .filter((e): e is CanonicalEntity => !!e && e.tipo === 'interface');
   const interfaces = interfacesEntidades.map((e) => e.nombre);
 
-  // Atributos propios (se omiten static: no se persisten)
-  const camposPropios = entidad.atributos.filter((a) => !a.estatico);
+  // Atributos propios (se omiten static: no se persisten). El atributo `id`
+  // del diagrama (cualquier mayuscula) ES la PK: se absorbe en el Long
+  // inyectado y no se genera como columna aparte (evita el duplicado).
+  const camposPropios = entidad.atributos.filter(
+    (a) => !a.estatico && !esNombreId(a.nombre),
+  );
   const tiposJava = camposPropios.map((a) => toJavaType(a.tipo, ctx.enums));
 
   // Todos los campos para los accessors (id + propios + relaciones)
